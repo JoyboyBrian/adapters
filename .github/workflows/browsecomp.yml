@@ -22,7 +22,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/browsecomp-venv
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/tmp/browsecomp-venv
     steps:
       - uses: actions/checkout@v6
         with:
