@@ -231,7 +231,8 @@ Accuracy is the fraction of tasks whose reward is `1`; each task's reward is the
 
 This is Brian Guo’s protocol-faithful BrowseComp contribution from
 [harbor#2355](https://github.com/harbor-framework/harbor/pull/2355), migrated from
-`464e90c108bfc3d220288c8de9b3f2d80c572b02` to the standalone adapters layout.
+`464e90c108bfc3d220288c8de9b3f2d80c572b02` to the standalone adapters layout in
+[adapters#44](https://github.com/harbor-framework/adapters/pull/44).
 The import commit preserves the source files and attribution; the migration changes
 paths, standalone test setup, CI, and documentation. Prompts, scoring, task templates,
 and the original-side parity runner retain their source behavior.
