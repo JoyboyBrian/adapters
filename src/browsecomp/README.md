@@ -1,4 +1,4 @@
-## BrowseComp → Harbor Adapter
+# BrowseComp → Harbor Adapter
 
 ## Overview
 
@@ -32,10 +32,6 @@ The shared task layer preserves the official:
 - `random.Random(0).sample(...)` semantics through `--examples N`.
 
 The generated `instruction.md` is exactly the formatted official query, with no Harbor prefix and no terminal newline. Ground truth and grader credentials stay in a separate verifier environment.
-
-### Corrected scoring bug
-
-The pinned upstream code applies regex `correct: (yes|no)`, returns `match.group(0)` such as `correct: yes`, and then compares the result with `yes`. That makes every parseable judgment score false. [OpenAI PR #67](https://github.com/openai/simple-evals/pull/67) proposes the intended `group(1)` correction. This adapter applies that correction, fails closed to `no` for an unparseable judgment, and labels the protocol as corrected rather than claiming bug-for-bug output parity.
 
 ### One-shot lane protocol
 
@@ -88,7 +84,7 @@ browsecomp-0001/
 The adapter code directory follows the standard Harbor package layout:
 
 ```text
-adapters/browsecomp/
+src/browsecomp/
 ├── README.md
 ├── adapter_metadata.json
 ├── parity_experiment.json
@@ -101,7 +97,7 @@ adapters/browsecomp/
     ├── __init__.py
     ├── adapter.py                       # Dataset download/decrypt and task generation
     ├── audit.py                         # `browsecomp-audit` CLI: scan run logs for answer-source indicators
-    ├── main.py                          # `browsecomp-adapter` CLI entry point
+    ├── main.py                          # `browsecomp` CLI entry point
     ├── official.py                      # Pinned upstream protocol: templates, decryption, grader parsing
     ├── reference_agent.py               # One-shot Chat Completions reference agent (`import_path`)
     ├── OPENAI_SIMPLE_EVALS_LICENSE.txt  # Upstream MIT license for code ported in official.py
@@ -112,20 +108,20 @@ adapters/browsecomp/
 
 ### Running with Datasets Registry
 
-Once the dataset is published to the Harbor registry, the entire benchmark can be run directly:
+Dataset registration remains deferred pending a maintainer decision on encrypted-upstream publication. The commands below are conditional examples for a future approved registry release; use local task directories today:
 
 ```bash
 # Use oracle agent (reference solution)
-uv run harbor run -d openai/browsecomp
+uv run --project src/browsecomp --group test harbor run -d openai/browsecomp
 
 # Use your specified agent and model. The appended instruction tells the agent
 # to write its final answer to /app/response.txt (the only graded artifact);
 # without it, ordinary agents reply in chat only and score zero.
-uv run harbor run -d openai/browsecomp -a <agent_name> -m "<model_name>" \
-  --extra-instruction-path adapters/browsecomp/agentic_instruction.md
+uv run --project src/browsecomp --group test harbor run -d openai/browsecomp -a <agent_name> -m "<model_name>" \
+  --extra-instruction-path src/browsecomp/agentic_instruction.md
 ```
 
-> [For adapter creators]: The generated task directories must first be uploaded to [harbor-datasets](https://github.com/laude-institute/harbor-datasets) and registered. Until those PRs are merged, use the job configurations below with locally generated task directories.
+> Do not upload generated tasks: they contain decrypted benchmark data. Publication handling is still under discussion in [the original PR](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5087201197) and [harbor-datasets#246](https://github.com/harbor-framework/harbor-datasets/issues/246). Any future registry flow must be agreed separately.
 
 ### Using Job Configurations
 
@@ -133,14 +129,14 @@ Three reference configurations are provided. Use `.env` without exporting or pri
 
 ```bash
 # GPT-5.6 under the corrected simple-evals-compatible one-shot protocol
-PYTHONPATH=adapters/browsecomp/src uv run harbor run --env-file .env \
-  -c adapters/browsecomp/run_browsecomp_oneshot.yaml
+PYTHONPATH=src/browsecomp/src uv run --project src/browsecomp --group test harbor run --env-file .env \
+  -c src/browsecomp/run_browsecomp_oneshot.yaml
 
 # Harbor-native agentic search with Daytona + Codex + GPT-5.6 (seed-0 30-task subset)
-uv run harbor run --env-file .env -c adapters/browsecomp/run_browsecomp_agentic.yaml
+uv run --project src/browsecomp --group test harbor run --env-file .env -c src/browsecomp/run_browsecomp_agentic.yaml
 
 # Verifier plumbing smoke test using the oracle
-uv run harbor run --env-file .env -c adapters/browsecomp/run_browsecomp.yaml
+uv run --project src/browsecomp --group test harbor run --env-file .env -c src/browsecomp/run_browsecomp.yaml
 ```
 
 Mind agentic-lane cost before scaling up: live web-search loops accumulate context, and the observed candidate cost on the seed-0 subset ranged $0.28–4.49 per task (mean ≈ $1.27; add a `task_names` filter to smoke-test a single task first). Every scored task normally makes a grader call; the one-shot lane also makes one candidate call. For agentic runs, preserve the job config, agent version, ATIF trajectory, and trial results.
@@ -153,20 +149,20 @@ For quick testing or debugging a single task:
 
 ```bash
 # Run a single task with oracle (pre-written solution)
-uv run harbor trial start -p datasets/browsecomp/browsecomp-0001
+uv run --project src/browsecomp --group test harbor trial start -p datasets/browsecomp/browsecomp-0001
 
 # Run a single task with a specific agent and model
-uv run harbor trial start -p datasets/browsecomp/browsecomp-0001 -a <agent_name> -m "<model_name>"
+uv run --project src/browsecomp --group test harbor trial start -p datasets/browsecomp/browsecomp-0001 -a <agent_name> -m "<model_name>"
 ```
 
 The verifier still requires `OPENAI_API_KEY` for the pinned grader model.
 
 ## Usage: Create Task Directories
 
-Generate the checksum-verified official dataset from the repository root:
+Generate the checksum-verified official dataset from the repository root (the equivalent canonical entry point is `cd src/browsecomp && uv run browsecomp --output-dir ../../datasets/browsecomp`):
 
 ```bash
-uv run --project adapters/browsecomp browsecomp --output-dir datasets/browsecomp
+uv run --project src/browsecomp browsecomp --output-dir datasets/browsecomp
 ```
 
 Available flags:
@@ -223,11 +219,89 @@ Set the Harbor one-shot config's candidate to `openai/gpt-4.1-2025-04-14` and ge
 ```bash
 PYTHONPATH="$PWD/human-eval" python -m simple-evals.simple_evals \
   --model gpt-4.1 --eval browsecomp --examples <N>
-PYTHONPATH=adapters/browsecomp/src uv run harbor run --env-file .env \
+PYTHONPATH=src/browsecomp/src uv run --project src/browsecomp --group test harbor run --env-file .env \
   -c <your-gpt-4.1-copy-of-run_browsecomp_oneshot.yaml>
 ```
 
 Accuracy is the fraction of tasks whose reward is `1`; each task's reward is the official grader's binary `correct: yes/no` judgment.
+
+## Notes & Caveats
+
+### Migration and review continuity
+
+This is Brian Guo’s protocol-faithful BrowseComp contribution from
+[harbor#2355](https://github.com/harbor-framework/harbor/pull/2355), migrated from
+`464e90c108bfc3d220288c8de9b3f2d80c572b02` to the standalone adapters layout.
+The import commit preserves the source files and attribution; the migration changes
+paths, standalone test setup, CI, and documentation. Prompts, scoring, task templates,
+and the original-side parity runner retain their source behavior.
+
+Related work: [harbor#1521 by @wizard1203](https://github.com/harbor-framework/harbor/pull/1521)
+includes a Claude-Code/Haiku parity study. This contribution instead pins OpenAI’s
+public one-shot protocol, judge, dataset checksum, and separate verifier, with a
+separately reported Codex search lane. Coordinate review across both PRs. This
+migration concerns BrowseComp, not BrowseComp-Plus.
+
+Review context retained from the original PR:
+
+- [Maintainer migration request](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-6004947042): carry forward three matched 30-task runs and resolve publication handling separately.
+- [Standard CLI run and shared tasks](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5017835359): Codex scored 24/30; both lanes use identical generated tasks, with the response-file instruction appended only by the agentic config.
+- [Upstream license](https://github.com/harbor-framework/harbor/pull/2355#discussion_r3611304044) and [module roles](https://github.com/harbor-framework/harbor/pull/2355#discussion_r3611354364): Brian’s explanations and the MIT notice remain. These two threads and the standard-CLI-run thread were still marked unresolved when migrated; the replies are evidence, not a claim of maintainer acceptance.
+- [Dataset policy follow-up](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5087201197): publication is deferred. The earlier claim that abc-bench was an unregistered precedent was corrected; it is registered. A future encrypted/scaffolding-only registration was proposed but is not implemented here.
+- Resolved review fixes remain: correct agentic subset assertion, inconclusive audit results for skipped files, zero score for non-UTF-8 answers, verifier OpenAI SDK major-version alignment, and distinct invalid audit-path exit code.
+
+Public historical evidence remains in
+[HF parity PR #265](https://huggingface.co/datasets/harborframework/parity-experiments/discussions/265):
+original stdout, three Harbor job configurations/results, result collections,
+full-scale oracle results, and the agentic job summary. The [oracle screenshot](https://github.com/harbor-framework/harbor/pull/2355)
+and [agentic screenshot](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5017835359)
+remain linked at their original locations. Trial-level artifacts were deliberately
+withheld because they contain decrypted benchmark content; this migration neither
+uploads them nor claims to have revalidated private archives.
+
+The July 2026 one-shot parity, full-scale oracle, and agentic results are historical
+evidence, not reruns on the migrated head. The retained reports do not establish an
+exact historical Harbor commit or all modern preflight fields. Any new live/parity
+run or methodology change needs maintainer coordination. Dataset registration and
+acceptance of the 30-task/custom-agent parity scope remain review decisions.
+
+The destination contract was read at adapters commit
+`08cbb3a6198adbf7b87323c884180e0e0fffd7d1`. Its compatibility baseline is pinned
+in the test group. The task template retains `schema_version = "1.3"` because the
+existing adapter uses artifact transfer and a separate verifier. It also retains
+upstream `--examples 30` sampling instead of adding a new `--split parity` interface;
+no registry parity tag is claimed.
+
+### Offline migration validation
+
+From a clean repository checkout, keep the test environment outside the adapter
+so the structural validator scans adapter source only:
+
+```bash
+export UV_PROJECT_ENVIRONMENT="$PWD/tmp/browsecomp-venv"
+uv sync --project src/browsecomp --group test --locked
+uv run --project src/browsecomp --group test --locked pytest src/browsecomp/tests -q
+uv run --project src/browsecomp --group test --locked ruff check src/browsecomp
+uv run --project src/browsecomp --group test --locked ruff format --check src/browsecomp
+uv run --project src/browsecomp --group test --locked ty check --project src/browsecomp src/browsecomp/src
+uv run --project src/browsecomp --group test --locked python scripts/validate_adapter.py browsecomp
+```
+
+The preserved tests use synthetic encrypted rows and mocked model responses; no
+real dataset download, model API calls, Docker/Daytona jobs, or paid runs are needed.
+The scoped BrowseComp workflow uses a temporary environment and runs these checks on Linux and Windows (the existing
+bash-only oracle-script test is skipped on Windows). Structural validation retains
+one expected warning for `dataset_pr = null`.
+
+Source-head CI at `464e90c1` had passing Ruff, Type Check, Windows tests, and Linux
+non-runtime tests (5,460 passed). Its [Linux runtime job](https://github.com/harbor-framework/harbor/actions/runs/30933328956/job/92073163999)
+failed six Terminus-2 integration tests (trajectory/traces/interleaved-thinking
+assertions), outside the BrowseComp adapter. These failures are not reported as a
+green source suite and are not changed by this migration.
+
+### Corrected scoring bug
+
+The pinned upstream code applies regex `correct: (yes|no)`, returns `match.group(0)` such as `correct: yes`, and then compares the result with `yes`. That makes every parseable judgment score false. [OpenAI PR #67](https://github.com/openai/simple-evals/pull/67) proposes the intended `group(1)` correction. This adapter applies that correction, fails closed to `no` for an unparseable judgment, and labels the protocol as corrected rather than claiming bug-for-bug output parity.
 
 ### Protocol differences vs. the public runner
 
@@ -244,7 +318,6 @@ Accuracy is the fraction of tasks whose reward is `1`; each task's reward is the
 
 The agentic lane intentionally differs further by adding a harness loop, web/search tools, sandbox behavior, context management, max reasoning, and a file-writing instruction. Comparing the two GPT-5.6 lanes is useful, but the delta represents all of those changes together. Neither score is directly comparable with a published score from an undisclosed harness.
 
-## Notes & Caveats
 
 - OpenAI deprecated `simple-evals` for new results in July 2025 while retaining it as reference code. This adapter pins a revision for reproducibility.
 - The OpenAI SDK was not pinned by upstream; this adapter constrains it to major version 2 for reproducible installation.
@@ -265,7 +338,7 @@ For reportable agentic runs:
 3. Scan the retained job directory for known indicators:
 
    ```bash
-   uv run --project adapters/browsecomp browsecomp-audit jobs/<job-directory>
+   uv run --project src/browsecomp browsecomp-audit jobs/<job-directory>
    ```
 
    Exit `1` flags suspected contamination. Exit `2` reports an inconclusive scan
@@ -286,10 +359,12 @@ Every reported agentic score should identify at least:
 Python 3.12 or newer and `uv` are required. The one-shot lane and verifier require `OPENAI_API_KEY`; the checked-in agentic example also requires `DAYTONA_API_KEY`.
 
 ```bash
-uv sync --project adapters/browsecomp
+uv sync --project src/browsecomp --group test --locked
 ```
 
-The adapter is a standalone uv package; manage its dependencies with `uv add` / `uv remove` from `adapters/browsecomp/`.
+The `test` group installs the external Harbor harness at the destination guide’s compatibility baseline, `99218a4611e3bd76e49ce3b5f977e8c8134ad3ac`, plus the offline test tools. Ruff remains pinned to the source PR’s `0.15.17` version. Generation alone needs only `uv sync --project src/browsecomp --locked`. The Daytona example additionally needs Harbor’s `daytona` extra installed in the same environment before a separately authorized live run. Job-config commands run from the repository root.
+
+The adapter is a standalone uv package; manage its dependencies with `uv add` / `uv remove` from `src/browsecomp/`.
 
 ## Troubleshooting
 
@@ -313,7 +388,7 @@ The adapter is a standalone uv package; manage its dependencies with `uv add` / 
 
 This adapter is developed and maintained by [Brian Guo](mailto:gzybrian@gmail.com).
 
-- Submit issues and pull requests to the main Harbor repository.
+- Submit issues and pull requests to [harbor-framework/adapters](https://github.com/harbor-framework/adapters).
 - Follow Harbor's coding style and adapter review guidelines.
 
 ## Acknowledgement

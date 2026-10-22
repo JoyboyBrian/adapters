@@ -26,7 +26,7 @@ from harbor.models.task.config import NetworkMode, TaskConfig
 from harbor.models.trial.config import AgentConfig as TrialAgentConfig
 from harbor.models.task.verifier_mode import VerifierEnvironmentMode
 
-ADAPTER_SRC = Path(__file__).parents[3] / "adapters/browsecomp/src"
+ADAPTER_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(ADAPTER_SRC))
 
 from browsecomp.adapter import BrowseCompAdapter, BrowseCompTask  # noqa: E402
@@ -643,7 +643,7 @@ def test_reference_and_agentic_configs_keep_protocols_separate() -> None:
     assert agentic_config.environment.type is not None
     assert agentic_config.environment.type.value == "daytona"
     assert agentic_config.extra_instruction_paths == [
-        Path("adapters/browsecomp/agentic_instruction.md")
+        Path("src/browsecomp/agentic_instruction.md")
     ]
     assert agentic_config.datasets[0].path == Path("datasets/browsecomp-parity")
     assert agentic_config.datasets[0].task_names is None
