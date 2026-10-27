@@ -8,15 +8,17 @@ instead of the rejected ``max_tokens``, ``reasoning_effort="none"``, and the
 original temperature 0.5. The grader stays the pinned
 ``gpt-4.1-2025-04-14`` profile.
 
-Usage (from a directory containing ``simple-evals/`` and ``human-eval/``):
+Usage (from a directory containing the patched ``simple-evals/`` checkout):
 
-    PYTHONPATH="$PWD/human-eval" python parity_original_gpt56.py
+    python /path/to/adapters/src/browsecomp/parity_original_gpt56.py
 
 Prints the official AGGREGATE METRICS / Accuracy lines from BrowseCompEval.
 """
 
+import hashlib
 import importlib
 import os
+from pathlib import Path
 import sys
 
 sys.path.insert(0, os.getcwd())
@@ -27,6 +29,19 @@ ccs = importlib.import_module("simple-evals.sampler.chat_completion_sampler")
 CANDIDATE_MODEL = "gpt-5.6-sol"
 GRADER_MODEL = "gpt-4.1-2025-04-14"
 NUM_EXAMPLES = 30
+# Pin the upstream evaluator plus only the checked-in capture-group correction.
+PATCHED_GRADER_SHA256 = (
+    "9395baba28512332ac0da27414180c56abf4db237ade50f8a8ac324c50efad50"
+)
+
+
+def validate_upstream() -> None:
+    source = Path(bc.__file__).read_text(encoding="utf-8")
+    if hashlib.sha256(source.encode()).hexdigest() != PATCHED_GRADER_SHA256:
+        raise SystemExit(
+            "Expected simple-evals revision 652c89d0ca9df547706735883097e9537d40dc47 "
+            "with simple-evals-grader.patch applied; see the adapter README."
+        )
 
 
 class GPT5ChatCompletionSampler(ccs.ChatCompletionSampler):
@@ -80,6 +95,7 @@ class GPT5ChatCompletionSampler(ccs.ChatCompletionSampler):
 
 
 def main() -> None:
+    validate_upstream()
     grader = ccs.ChatCompletionSampler(
         model=GRADER_MODEL,
         system_message=ccs.OPENAI_SYSTEM_MESSAGE_API,

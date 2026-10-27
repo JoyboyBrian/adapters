@@ -1,3 +1,5 @@
+# Exploratory only: public networking does not block benchmark answer sources.
+# Reportable scores require externally enforced contamination controls; see README.
 job_name: browsecomp-agentic-codex-gpt56-seed0-30
 jobs_dir: jobs
 n_attempts: 1

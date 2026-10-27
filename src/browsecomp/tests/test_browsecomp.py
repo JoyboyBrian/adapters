@@ -44,7 +44,7 @@ from browsecomp.official import (  # noqa: E402
     decrypt,
     parse_grader_response,
 )
-from browsecomp import audit, reference_agent  # noqa: E402
+from browsecomp import audit, main as cli, reference_agent  # noqa: E402
 from browsecomp.reference_agent import BrowseCompReferenceAgent  # noqa: E402
 
 
@@ -143,6 +143,82 @@ def test_zero_examples_matches_official_full_dataset_behavior(tmp_path: Path) ->
     ]
 
 
+@pytest.mark.parametrize("selection", [["--split", "parity"], ["--examples", "30"]])
+def test_cli_generates_recorded_parity_subset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: list[str]
+) -> None:
+    dataset_path = tmp_path / "synthetic.csv"
+    _write_synthetic_dataset(dataset_path, size=1266)
+    monkeypatch.setattr(
+        cli,
+        "BrowseCompAdapter",
+        lambda **kwargs: BrowseCompAdapter(**kwargs, verify_dataset=False),
+    )
+    output = tmp_path / "tasks"
+
+    assert (
+        cli.main(
+            [
+                "--dataset-path",
+                str(dataset_path),
+                "--output-dir",
+                str(output),
+                *selection,
+            ]
+        )
+        == 0
+    )
+    assert sorted(path.name for path in output.iterdir()) == sorted(
+        f"browsecomp-{index:04d}"
+        for index in random.Random(0).sample(range(1, 1267), 30)
+    )
+
+
+@pytest.mark.parametrize(
+    ("conflict", "error"),
+    [
+        (["--examples", "30"], SystemExit),
+        (["--limit", "1"], ValueError),
+        (["--task-ids", "1"], ValueError),
+    ],
+)
+def test_parity_split_rejects_conflicting_selection(
+    monkeypatch: pytest.MonkeyPatch, conflict: list[str], error: type[BaseException]
+) -> None:
+    def unexpected_run(self: BrowseCompAdapter) -> None:
+        pytest.fail("Conflicting selection must fail before downloading the dataset")
+
+    monkeypatch.setattr(BrowseCompAdapter, "run", unexpected_run)
+    with pytest.raises(error):
+        cli.main(["--split", "parity", *conflict])
+
+
+def test_original_runner_rejects_unpatched_source_before_api_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "browsecomp_eval.py"
+    source_path.write_text('return match.group(0) if match else "no"\n')
+    monkeypatch.setitem(
+        sys.modules,
+        "simple-evals.browsecomp_eval",
+        SimpleNamespace(__file__=source_path),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "simple-evals.sampler.chat_completion_sampler",
+        SimpleNamespace(ChatCompletionSampler=object),
+    )
+    spec = importlib.util.spec_from_file_location(
+        "parity_original_gpt56", ADAPTER_SRC.parent / "parity_original_gpt56.py"
+    )
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+
+    with pytest.raises(SystemExit, match="simple-evals-grader.patch"):
+        runner.main()
+
+
 def test_official_thirty_example_subset_is_stable(tmp_path: Path) -> None:
     adapter = BrowseCompAdapter(
         output_dir=tmp_path,
@@ -225,6 +301,7 @@ def test_generate_task_preserves_official_protocol(tmp_path: Path) -> None:
     config = TaskConfig.model_validate_toml(
         (task_dir / "task.toml").read_text(encoding="utf-8")
     )
+    assert config.schema_version == "1.0"
     assert config.task is not None
     assert config.task.name == "openai/browsecomp__browsecomp-0001"
     assert config.metadata["problem_topic"] == "topic-1"

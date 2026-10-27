@@ -38,11 +38,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Generate the first N records (Harbor adapter convenience flag)",
     )
-    parser.add_argument(
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--examples",
         type=int,
         default=None,
         help="Match official --examples N sampling with random seed 0",
+    )
+    selection.add_argument(
+        "--split",
+        choices=["parity"],
+        help="Generate the recorded seed-0 30-task parity subset",
     )
     parser.add_argument(
         "--overwrite",
@@ -67,7 +73,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=args.output_dir,
         dataset_source=dataset_source,
         limit=args.limit,
-        examples=args.examples,
+        examples=30 if args.split == "parity" else args.examples,
         overwrite=args.overwrite,
         task_ids=args.task_ids,
     )

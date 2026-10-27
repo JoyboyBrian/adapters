@@ -61,6 +61,8 @@ The grader follows the same sampler behavior. A missing Harbor artifact scores z
 
 This configuration is a Harbor-native system evaluation, not a reconstruction of OpenAI's private BrowseComp or GPT-5.6 harness. Replacing Codex with Terminus 2 or another agent is supported, but changes the measured system and therefore the score's meaning.
 
+The checked-in agentic configuration is exploratory: its public networking does not prevent downloading benchmark answers. Reportable agentic runs need the external contamination controls described under Notes & Caveats; the historical 24/30 result does not establish that those controls were enforced.
+
 ## Generated Task Structure
 
 ```text
@@ -172,6 +174,7 @@ Available flags:
 - `--overwrite` — replace generated tasks after adapter changes.
 - `--task-ids 1 browsecomp-0042` — generate selected 1-based rows.
 - `--examples N` — reproduce OpenAI's seed-0 random subset selection.
+- `--split parity` — generate the recorded seed-0 30-task subset, identical to `--examples 30`; cannot be combined with `--examples`, `--limit`, or `--task-ids`.
 - `--dataset-path PATH` — use an offline copy; the official checksum is still enforced.
 
 Task IDs are stable, from `browsecomp-0001` through `browsecomp-1266`, and derive from the fixed CSV row order.
@@ -180,48 +183,59 @@ Task IDs are stable, from `browsecomp-0001` through `browsecomp-1266`, and deriv
 
 Matched one-shot parity was run on the deterministic seed-0 `--examples 30` subset with a `gpt-5.6-sol` candidate and the pinned `gpt-4.1-2025-04-14` judge on both sides, three runs per side:
 
-| Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
+| Agent | Model | Metric | Runs | Dataset Size | Original (mean ± SEM) | Harbor (mean ± SEM) |
 | --- | --- | --- | ---: | ---: | --- | --- |
-| `simple-evals-one-shot` | `gpt-5.6-sol` | Accuracy | 3 | 30 | 0.067 ± 0.000 (SEM) | 0.089 ± 0.011 (SEM) |
-| Codex (`agentic-search`) | `gpt-5.6` | Accuracy | 1 | 30 | Different undisclosed harness | 0.800 (24/30, not a parity claim) |
+| `browsecomp-simple-evals-one-shot@0.1.0+simple-evals.652c89d0ca9d` | `gpt-5.6-sol` | Accuracy | 3 | 30 (2.4%) | 0.067 ± 0.000 | 0.089 ± 0.011 |
 
-Per-run scores are recorded in [`parity_experiment.json`](parity_experiment.json); the run ranges overlap (`0.067` appears on both sides). The original side is the pinned public runner plus only the openai/simple-evals#67 grader fix, driven by [`parity_original_gpt56.py`](parity_original_gpt56.py); the Harbor side is [`run_browsecomp_parity_gpt56.yaml`](run_browsecomp_parity_gpt56.yaml). A `gpt-4.1` candidate probe on the original side scored 0/30 — consistent with the paper's ~1% non-browsing baseline — so a gpt-4.1 row would compare zeros and is not reported. The agentic lane has no matched original-side harness and does not claim parity; its row reports a single Codex + `openai/gpt-5.6` run (live web search, Daytona, [`run_browsecomp_agentic.yaml`](run_browsecomp_agentic.yaml)) on the same seed-0 subset, with 30/30 trials completing without exceptions and a `browsecomp-audit` scan of the retained job logs reporting `clean`.
+Per-run scores are recorded in [`parity_experiment.json`](parity_experiment.json); the run ranges overlap only at their boundary (`0.0667` appears on both sides). The original side is the pinned public runner plus the one-line openai/simple-evals#67 grader fix, driven by [`parity_original_gpt56.py`](parity_original_gpt56.py); the Harbor side is [`run_browsecomp_parity_gpt56.yaml`](run_browsecomp_parity_gpt56.yaml). With only 2–3 successes per 30-task run, satisfying the range-overlap rule does not establish full-benchmark equivalence. Acceptance of this subset remains a maintainer decision. A `gpt-4.1` candidate probe scored 0/30 and is not reported as parity. The separate agentic result is recorded under Notes & Caveats.
 
-The historical GPT-4.1 profile remains the protocol-conformance anchor: it is the only candidate profile in the pinned public runner, so it can run on the original side with zero modification (see [`run_browsecomp_parity.yaml`](run_browsecomp_parity.yaml)).
+The historical GPT-4.1 profile remains the protocol-conformance anchor: it is the only candidate profile in the pinned public runner (see [`run_browsecomp_parity.yaml`](run_browsecomp_parity.yaml)); scoring still requires the correction below.
+
+### Preparing the reported GPT-5.6 experiment
+
+Run these setup commands from this repository's root. Use a fresh checkout/output location and keep `OPENAI_API_KEY` in the local `.env`. The locked test environment supplies the dependencies used by both runners. The original-side wrapper imports only the BrowseComp evaluator and Chat Completions sampler, so it does not need the unrelated `human-eval` checkout.
+
+```bash
+export BROWSECOMP_REPO="$PWD"
+export UV_PROJECT_ENVIRONMENT="$BROWSECOMP_REPO/tmp/browsecomp-venv"
+uv sync --project src/browsecomp --group test --locked
+mkdir -p tmp/browsecomp-original
+git clone https://github.com/openai/simple-evals.git tmp/browsecomp-original/simple-evals
+git -C tmp/browsecomp-original/simple-evals checkout --detach 652c89d0ca9df547706735883097e9537d40dc47
+git -C tmp/browsecomp-original/simple-evals apply --check "$BROWSECOMP_REPO/src/browsecomp/simple-evals-grader.patch"
+git -C tmp/browsecomp-original/simple-evals apply "$BROWSECOMP_REPO/src/browsecomp/simple-evals-grader.patch"
+uv run --project src/browsecomp --locked browsecomp \
+  --output-dir datasets/browsecomp-parity --split parity
+```
+
+[`simple-evals-grader.patch`](simple-evals-grader.patch) contains only the `group(0)` → `group(1)` correction proposed in [openai/simple-evals#67](https://github.com/openai/simple-evals/pull/67). The wrapper checks the patched evaluator's SHA-256 before creating API clients or loading the dataset; an unpatched or different evaluator stops with an error. `original_parity_repo` points to this reproduction bundle, with the upstream commit pinned explicitly above.
 
 ### Reproducing the original benchmark side
 
-The pinned public runner does not contain a GPT-5.6 model profile. Execute it with its historical GPT-4.1 profile when validating the adapter's prompt, request, and grader plumbing:
+After coordinating new runs and the required two-sided sanity checks with maintainers, execute one original-side run from the directory containing `simple-evals/`:
 
 ```bash
-git clone https://github.com/openai/simple-evals.git
-git clone https://github.com/openai/human-eval.git
-git -C simple-evals checkout 652c89d0ca9df547706735883097e9537d40dc47
-pip install anthropic blobfile jinja2 numpy openai pandas requests scipy tqdm
-export OPENAI_API_KEY=...
-PYTHONPATH="$PWD/human-eval" python -m simple-evals.simple_evals \
-  --model gpt-4.1 --eval browsecomp
+cd "$BROWSECOMP_REPO/tmp/browsecomp-original"
+run=1
+uv run --project "$BROWSECOMP_REPO/src/browsecomp" --group test --locked \
+  --env-file "$BROWSECOMP_REPO/.env" \
+  python "$BROWSECOMP_REPO/src/browsecomp/parity_original_gpt56.py" \
+  > "original_gpt56_run${run}.log"
 ```
 
-Add `--examples N` to select the same deterministic seed-0 subset on both sides.
-
-> **Parity caveat**: the pinned revision still contains the `group(0)` scoring
-> bug, so an unpatched original-side run reports 0% accuracy by construction.
-> For matched parity, apply the one-line `group(1)` fix from
-> [openai/simple-evals#67](https://github.com/openai/simple-evals/pull/67) to
-> the original side (this adapter already applies it) and record the patch
-> alongside the parity results.
+The wrapper fixes `gpt-5.6-sol`, the seed-0 30-task sample, temperature `0.5`, `max_completion_tokens=2048`, `reasoning_effort="none"`, and the `gpt-4.1-2025-04-14` judge. Preserve its stdout; it contains aggregate scores, not per-task judgments.
 
 ### Reproducing the Harbor side
 
-Set the Harbor one-shot config's candidate to `openai/gpt-4.1-2025-04-14` and generate the matching subset with `--examples N`:
+Run the matching Harbor side next, from this repository's root:
 
 ```bash
-PYTHONPATH="$PWD/human-eval" python -m simple-evals.simple_evals \
-  --model gpt-4.1 --eval browsecomp --examples <N>
-PYTHONPATH=src/browsecomp/src uv run --project src/browsecomp --group test harbor run --env-file .env \
-  -c <your-gpt-4.1-copy-of-run_browsecomp_oneshot.yaml>
+cd "$BROWSECOMP_REPO"
+PYTHONPATH=src/browsecomp/src uv run --project src/browsecomp --group test --locked \
+  harbor run --env-file .env -c src/browsecomp/run_browsecomp_parity_gpt56.yaml
 ```
+
+After both sides complete successfully, repeat the original/Harbor pair for runs 2 and 3, changing `run` for each original log. Harbor assigns each run a unique timestamped job directory. Retain configs, results, runtime revisions, and private trial artifacts. These commands reproduce the documented protocol and subset using the compatibility pin; the historical Harbor revision and complete historical dependency environment were not recorded, so they are not an exact reconstruction of July's runtime.
 
 Accuracy is the fraction of tasks whose reward is `1`; each task's reward is the official grader's binary `correct: yes/no` judgment.
 
@@ -229,13 +243,7 @@ Accuracy is the fraction of tasks whose reward is `1`; each task's reward is the
 
 ### Migration and review continuity
 
-This is Brian Guo’s protocol-faithful BrowseComp contribution from
-[harbor#2355](https://github.com/harbor-framework/harbor/pull/2355), migrated from
-`464e90c108bfc3d220288c8de9b3f2d80c572b02` to the standalone adapters layout in
-[adapters#44](https://github.com/harbor-framework/adapters/pull/44).
-The import commit preserves the source files and attribution; the migration changes
-paths, standalone test setup, CI, and documentation. Prompts, scoring, task templates,
-and the original-side parity runner retain their source behavior.
+This is Brian Guo’s protocol-faithful BrowseComp contribution from [harbor#2355](https://github.com/harbor-framework/harbor/pull/2355), migrated from `464e90c108bfc3d220288c8de9b3f2d80c572b02` to the standalone adapters layout in [adapters#44](https://github.com/harbor-framework/adapters/pull/44). The import commit preserves the source files and attribution; the migration changes paths, standalone test setup, CI, and documentation. Subsequent review fixes add the parity CLI alias, validate the original-side scoring patch before a run, and align task-version and metadata fields with the destination contract. Benchmark prompts, sampling, and scoring remain unchanged.
 
 Related work: [harbor#1521 by @wizard1203](https://github.com/harbor-framework/harbor/pull/1521)
 includes a Claude-Code/Haiku parity study. This contribution instead pins OpenAI’s
@@ -251,14 +259,24 @@ Review context retained from the original PR:
 - [Dataset policy follow-up](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5087201197): publication is deferred. The earlier claim that abc-bench was an unregistered precedent was corrected; it is registered. A future encrypted/scaffolding-only registration was proposed but is not implemented here.
 - Resolved review fixes remain: correct agentic subset assertion, inconclusive audit results for skipped files, zero score for non-UTF-8 answers, verifier OpenAI SDK major-version alignment, and distinct invalid audit-path exit code.
 
-Public historical evidence remains in
-[HF parity PR #265](https://huggingface.co/datasets/harborframework/parity-experiments/discussions/265):
-original stdout, three Harbor job configurations/results, result collections,
-full-scale oracle results, and the agentic job summary. The [oracle screenshot](https://github.com/harbor-framework/harbor/pull/2355)
-and [agentic screenshot](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5017835359)
-remain linked at their original locations. Trial-level artifacts were deliberately
-withheld because they contain decrypted benchmark content; this migration neither
-uploads them nor claims to have revalidated private archives.
+Public historical evidence remains in [HF parity PR #265](https://huggingface.co/datasets/harborframework/parity-experiments/discussions/265): original stdout, three Harbor job configurations/results, result collections, full-scale oracle results, and the agentic job summary. The [oracle screenshot](https://github.com/user-attachments/assets/a6bd3a72-df57-48e9-8ce5-866ecd695c67) is embedded in the original PR description; the [agentic screenshot](https://github.com/harbor-framework/harbor/pull/2355#issuecomment-5017835359) is in a comment. Trial-level artifacts were withheld because they contain decrypted benchmark content; this migration neither uploads them nor claims to have revalidated private archives.
+
+### Historical evidence and its limits
+
+The [full-scale oracle result](https://huggingface.co/datasets/harborframework/parity-experiments/blob/refs%2Fpr%2F265/adapters/browsecomp/oracle/browsecomp-oracle-full/result.json) records **1266/1266 completed tasks, zero errors, and mean reward 1.000**. This validates the recorded oracle/verifier run separately from model parity.
+
+The public Harbor job summaries identify solved tasks without exposing their text:
+
+| Run | Solved task IDs | Public source |
+| --- | --- | --- |
+| Harbor 1 | `browsecomp-0862`, `browsecomp-1048`, `browsecomp-1195` | [Result](https://huggingface.co/datasets/harborframework/parity-experiments/blob/refs%2Fpr%2F265/adapters/browsecomp/harbor_parity/2026-07-16__17-48-53/result.json) |
+| Harbor 2 | `browsecomp-1048`, `browsecomp-1195` | [Result](https://huggingface.co/datasets/harborframework/parity-experiments/blob/refs%2Fpr%2F265/adapters/browsecomp/harbor_parity/2026-07-16__17-51-11/result.json) |
+| Harbor 3 | `browsecomp-0152`, `browsecomp-0862`, `browsecomp-1195` | [Result](https://huggingface.co/datasets/harborframework/parity-experiments/blob/refs%2Fpr%2F265/adapters/browsecomp/harbor_parity/2026-07-16__17-53-10/result.json) |
+| Original 1–3 | Unavailable in the public evidence; each run reports 2/30 correct | [Aggregate results](https://huggingface.co/datasets/harborframework/parity-experiments/tree/refs%2Fpr%2F265/adapters/browsecomp/results_collection) |
+
+The original wrapper discards the returned per-task results and prints aggregate scores only. Neither the public stdout nor its result collections establish the original solved IDs, so cross-side task overlap remains unverified. A complete 3+3 solved-task comparison requires retained original-side per-task evidence or coordinated new runs; no IDs are inferred from the aggregates.
+
+The separate historical agentic run used Codex + `openai/gpt-5.6`, live web search, and Daytona on the same subset: **24/30 (0.800)**, with 30 completed trials and zero exceptions. It has no matched original-side harness and is not parity evidence. The recorded audit reported `clean`, but the public artifacts do not establish enforced answer-source blocking; treat this as an exploratory system result pending a maintainer decision on contamination controls.
 
 The July 2026 one-shot parity, full-scale oracle, and agentic results are historical
 evidence, not reruns on the migrated head. The retained reports do not establish an
@@ -266,12 +284,7 @@ exact historical Harbor commit or all modern preflight fields. Any new live/pari
 run or methodology change needs maintainer coordination. Dataset registration and
 acceptance of the 30-task/custom-agent parity scope remain review decisions.
 
-The destination contract was read at adapters commit
-`08cbb3a6198adbf7b87323c884180e0e0fffd7d1`. Its compatibility baseline is pinned
-in the test group. The task template retains `schema_version = "1.3"` because the
-existing adapter uses artifact transfer and a separate verifier. It also retains
-upstream `--examples 30` sampling instead of adding a new `--split parity` interface;
-no registry parity tag is claimed.
+The destination contract was initially read at adapters commit `08cbb3a6198adbf7b87323c884180e0e0fffd7d1` and rechecked against review revision `c6eb509c459c994b90750d7d880dc93530e55d8f`. Its Harbor compatibility baseline is pinned in the test group. The task template now uses the contract's `version = "1.0"`; at the baseline, Harbor accepts that legacy key and retains artifact transfer, separate verification, and phase network policies. `--split parity` aliases the original `--examples 30` sampling. Registry publication, including a `parity` tag, remains deferred: `registry_benchmark_size` is `0` for this contribution. `dataset_pr` stays `null` with a compatibility warning because the validator rejects an empty array and no publication PR exists.
 
 ### Offline migration validation
 
@@ -288,11 +301,7 @@ uv run --project src/browsecomp --group test --locked ty check --project src/bro
 uv run --project src/browsecomp --group test --locked python scripts/validate_adapter.py browsecomp
 ```
 
-The preserved tests use synthetic encrypted rows and mocked model responses; no
-real dataset download, model API calls, Docker/Daytona jobs, or paid runs are needed.
-The scoped BrowseComp workflow uses a temporary environment and runs these checks on Linux and Windows (the existing
-bash-only oracle-script test is skipped on Windows). Structural validation retains
-one expected warning for `dataset_pr = null`.
+The tests use synthetic encrypted rows and mocked model responses; no real dataset download, model API calls, Docker/Daytona jobs, or paid runs are needed. The scoped BrowseComp workflow uses a temporary environment and runs these checks on Linux and Windows (the existing bash-only oracle-script test is skipped on Windows). Structural validation retains one expected warning for `dataset_pr = null`; passing it does not mean the dataset is published.
 
 Source-head CI at `464e90c1` had passing Ruff, Type Check, Windows tests, and Linux
 non-runtime tests (5,460 passed). Its [Linux runtime job](https://github.com/harbor-framework/harbor/actions/runs/30933328956/job/92073163999)
@@ -331,6 +340,8 @@ The agentic lane intentionally differs further by adding a harness loop, web/sea
 ### Benchmark integrity and answer-copying
 
 Separate verification prevents an ordinary agent from reading the local answer, but it cannot stop a hostile web-enabled agent from downloading the public encrypted CSV and applying the public decryption algorithm. The CSV encryption is a leakage deterrent, not an access-control boundary.
+
+The checked-in configuration does not enforce an egress proxy or path-level denylist. A heuristic audit is not prevention, and the one-shot parity result does not validate agentic contamination resistance. Maintainers must decide whether to accept the disclosed limitation or require verified controls before accepting agentic results. Prompt injection through a submitted answer is also an inherited LLM-judge risk; the audit does not detect it, and changing the official judge prompt would change the benchmark protocol.
 
 For reportable agentic runs:
 
