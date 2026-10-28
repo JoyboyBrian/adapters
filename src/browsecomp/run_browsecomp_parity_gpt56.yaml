@@ -3,7 +3,7 @@
 # side runs parity_original_gpt56.py against the pinned simple-evals revision.
 # Generate the matched subset first:
 #   uv run --project src/browsecomp browsecomp \
-#     --output-dir datasets/browsecomp-parity --examples 30
+#     --output-dir datasets/browsecomp-parity --split parity
 # job_name is intentionally omitted: each run gets a unique timestamped name.
 jobs_dir: jobs
 n_attempts: 1

@@ -1,9 +1,11 @@
-# Parity lane: the historical GPT-4.1 profile is the only candidate profile in
-# the pinned public runner, so the original side runs unmodified (plus the
-# one-line openai/simple-evals#67 grader fix; see README "Parity caveat").
+# Historical GPT-4.1 protocol-conformance profile, not the reported parity row
+# (that is run_browsecomp_parity_gpt56.yaml). GPT-4.1 is the only candidate
+# profile in the pinned public runner; its 30-task probe scored 0/30 and is not
+# reported as parity. Scoring uses the openai/simple-evals#67 grader fix; see
+# README "Corrected scoring bug".
 # Generate the matched subset first:
 #   uv run --project src/browsecomp browsecomp \
-#     --output-dir datasets/browsecomp-parity --examples 30
+#     --output-dir datasets/browsecomp-parity --split parity
 # job_name is intentionally omitted: each run gets a unique timestamped name.
 jobs_dir: jobs
 n_attempts: 1

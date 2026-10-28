@@ -25,7 +25,7 @@ agents:
 datasets:
   # The seed-0 30-task subset shared with the parity study. Generate it first:
   #   uv run --project src/browsecomp browsecomp \
-  #     --output-dir datasets/browsecomp-parity --examples 30
+  #     --output-dir datasets/browsecomp-parity --split parity
   - path: datasets/browsecomp-parity
 
 extra_instruction_paths:

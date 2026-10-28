@@ -55,6 +55,8 @@ The returned `message.content` is copied byte-for-byte to `/app/response.txt`; i
 
 The grader follows the same sampler behavior. A missing Harbor artifact scores zero without an API call; an existing empty or whitespace-only artifact is still sent to the grader, matching the public evaluator's treatment of model output.
 
+In this lane a missing artifact means the run failed before a response was uploaded, never that the model answered wrongly. If the candidate call outlives the agent timeout, Harbor records `AgentTimeoutError` in the trial's `exception_info` and still runs the verifier, which writes reward `0` with reason `missing response`. Count such trials as infrastructure failures: exclude them from accuracy and rerun them. Other agent exceptions, such as a missing `OPENAI_API_KEY`, stop the trial before verification. The reported parity runs had no trial exceptions.
+
 ### Agentic lane protocol
 
 [`run_browsecomp_agentic.yaml`](run_browsecomp_agentic.yaml) is a Daytona-backed example using Codex, the `openai/gpt-5.6` alias, max reasoning, and live web search over the seed-0 30-task subset shared with the parity study. Harbor appends [`agentic_instruction.md`](agentic_instruction.md) only in this lane so the selected harness knows where to save its final response. The official query in the generated task remains unchanged.
@@ -137,9 +139,11 @@ PYTHONPATH=src/browsecomp/src uv run --project src/browsecomp --group test harbo
 # Harbor-native agentic search with Daytona + Codex + GPT-5.6 (seed-0 30-task subset)
 uv run --project src/browsecomp --group test harbor run --env-file .env -c src/browsecomp/run_browsecomp_agentic.yaml
 
-# Verifier plumbing smoke test using the oracle
+# Verifier plumbing smoke test using the oracle (one task)
 uv run --project src/browsecomp --group test harbor run --env-file .env -c src/browsecomp/run_browsecomp.yaml
 ```
+
+[`run_browsecomp.yaml`](run_browsecomp.yaml) deliberately sets `n_tasks: 1` because every oracle trial still makes a paid grader call. Remove that line to verify all 1,266 tasks, as in the recorded full-scale oracle run.
 
 Mind agentic-lane cost before scaling up: live web-search loops accumulate context, and the observed candidate cost on the seed-0 subset ranged $0.28–4.49 per task (mean ≈ $1.27; add a `task_names` filter to smoke-test a single task first). Every scored task normally makes a grader call; the one-shot lane also makes one candidate call. For agentic runs, preserve the job config, agent version, ATIF trajectory, and trial results.
 
@@ -284,7 +288,7 @@ exact historical Harbor commit or all modern preflight fields. Any new live/pari
 run or methodology change needs maintainer coordination. Dataset registration and
 acceptance of the 30-task/custom-agent parity scope remain review decisions.
 
-The destination contract was initially read at adapters commit `08cbb3a6198adbf7b87323c884180e0e0fffd7d1` and rechecked against review revision `c6eb509c459c994b90750d7d880dc93530e55d8f`. Its Harbor compatibility baseline is pinned in the test group. The task template now uses the contract's `version = "1.0"`; at the baseline, Harbor accepts that legacy key and retains artifact transfer, separate verification, and phase network policies. `--split parity` aliases the original `--examples 30` sampling. Registry publication, including a `parity` tag, remains deferred: `registry_benchmark_size` is `0` for this contribution. `dataset_pr` stays `null` with a compatibility warning because the validator rejects an empty array and no publication PR exists.
+The destination contract was initially read at adapters commit `08cbb3a6198adbf7b87323c884180e0e0fffd7d1` and rechecked against review revisions `c6eb509c459c994b90750d7d880dc93530e55d8f` and `7b4df9deb2381ae32f26e6cebec06aaa2975dc56`; `docs/adapters.mdx` and `scripts/validate_adapter.py` are unchanged between those two revisions. Its Harbor compatibility baseline is pinned in the test group. The task template now uses the contract's `version = "1.0"`; at the baseline, Harbor accepts that legacy key and retains artifact transfer, separate verification, and phase network policies. `--split parity` aliases the original `--examples 30` sampling. Registry publication, including a `parity` tag, remains deferred: `registry_benchmark_size` is `0` for this contribution. `dataset_pr` stays `null` with a compatibility warning because the validator rejects an empty array and no publication PR exists.
 
 ### Offline migration validation
 
@@ -381,7 +385,7 @@ The adapter is a standalone uv package; manage its dependencies with `uv add` / 
 ## Troubleshooting
 
 - A checksum error means the input is not byte-for-byte identical to the pinned official CSV.
-- A missing-response result means the selected agent did not create `/app/response.txt`.
+- A missing-response result means the selected agent did not create `/app/response.txt`. In the one-shot lane this is always an infrastructure failure (usually `AgentTimeoutError`); rerun the trial instead of scoring it as incorrect.
 - A verifier error usually means `OPENAI_API_KEY` is missing, unavailable to the pinned grader model, or the outer timeout expired.
 - A Daytona setup error usually means `DAYTONA_API_KEY` is missing or the account cannot create a sandbox.
 
